@@ -3,9 +3,31 @@ import cv2
 import numpy as np
 from pylsd import lsd
 
+np.random.seed(42)
+SAVE_IMGS = True
 
+def DistLine2Point(line, point):
+    """
+    Compute the distance from a line segment to a point
+    
+    Parameters
+    ----------
+    line : ndarray of shape (4,)
+        The coordinates of two points (x1, y1, x2, y2) that define the line segment
+    point : ndarray of shape (2,)
+        The coordinates of the point (x, y)
 
-def FindVP(lines, K, ransac_thr, ransac_iter):
+    Returns
+    -------
+    dist : float
+        The distance from the line segment to the point
+    """
+    x1, y1, x2, y2 = line
+    dist = np.abs((y2 - y1) * point[0] - (x2 - x1) * point[1] + x2 * y1 - y2 * x1) / np.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2)
+    return dist
+    
+
+def FindVP(lines, K, ransac_thr = 0.04, ransac_iter = 5000):
     """
     Find the vanishing point
     
@@ -27,10 +49,61 @@ def FindVP(lines, K, ransac_thr, ransac_iter):
         The vanishing point
     inlier : ndarray of shape (N_i,)
         The index set of line segment inliers
+    outlier : ndarray of shape (N_l - N_i, 4)
+        The set of line segments outliers
     """
-    
-    # TODO Your code goes here
-    pass
+    #normalize the lines
+    x1 = lines[:, 0]
+    y1 = lines[:, 1]
+    x2 = lines[:, 2]
+    y2 = lines[:, 3]
+    p1 = np.array([x1, y1, np.ones(x1.shape)])
+    p2 = np.array([x2, y2, np.ones(x2.shape)])
+    n_p1 = (np.linalg.inv(K) @ p1).T
+    n_p2 = (np.linalg.inv(K) @ p2).T
+    n_lines = np.hstack([n_p1[:,:2], n_p2[:,:2]])
+
+
+    for i in range(ransac_iter):
+        # Randomly select 2 line segments
+        idx = np.random.choice(lines.shape[0], 2, replace=False)
+        line1 = np.hstack([n_p1[idx[0],:2], n_p2[idx[0],:2]])
+        line2 = np.hstack([n_p1[idx[1],:2], n_p2[idx[1],:2]])
+        # Compute the intersection point of the two lines
+        x1, y1, x2, y2 = line1
+        x3, y3, x4, y4 = line2
+        A = np.asarray([
+            [y2 - y1, x1 - x2],
+            [y4 - y3, x3 - x4]
+        ])
+        b = np.asarray([
+            (y2 - y1) * x1 - (x2 - x1) * y1,
+            (y4 - y3) * x3 - (x4 - x3) * y3
+        ])
+        try:
+            vp = np.linalg.solve(A, b)
+        except:
+            continue
+
+        # Compute the inliers
+        inlier = []
+        inlier_max = []
+        for j in range(lines.shape[0]):
+            dist = DistLine2Point(n_lines[j], vp)
+            if dist < ransac_thr:
+                inlier.append(j)
+        if len(inlier) > len(inlier_max):
+            inlier_max = inlier
+            vp_max = vp
+
+        vp_max = np.array([vp_max[0], vp_max[1],1])
+        vp_max = K @ vp_max
+        vp_max = vp_max[:2]
+
+    inlier = lines[inlier_max]
+    outlier = np.delete(lines, inlier_max, axis=0)
+
+    return vp_max, inlier, outlier
 
 
 def ClusterLines(lines):
@@ -52,7 +125,14 @@ def ClusterLines(lines):
     """
 
     # TODO Your code goes here
-    pass
+    slop = (lines[:,3] - lines[:,1]) / (lines[:,2] - lines[:,0] + 1e-7)
+    angle = np.arctan(slop)
+    angle = np.abs(np.degrees(angle))
+    
+    lines_x = lines[angle < 10]
+    lines_y = lines[angle > 80]
+
+    return lines_x, lines_y
 
 
 def CalibrateCamera(vp_x, vp_y, vp_z):
@@ -258,7 +338,7 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
     # TODO Your code goes here
     pass
 
-
+SAVE_RESULT = True
 
 if __name__ == '__main__':
 
@@ -267,7 +347,15 @@ if __name__ == '__main__':
     im_h = im.shape[0]
     im_w = im.shape[1]
     im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-    lines = lsd(im_gray)
+    lines = lsd(im_gray,1)
+
+    # save the detected line segments
+    if SAVE_IMGS:
+        im_lines = np.copy(im)
+        for i in range(lines.shape[0]):
+            x1, y1, x2, y2 = lines[i,:4]
+            cv2.line(im_lines, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.imwrite('airport_lsd.jpg', im_lines)
 
 	# Approximate K
     f = 300
@@ -280,14 +368,70 @@ if __name__ == '__main__':
 	#####################################################################
     # Compute the major z-directional vanishing point and its line segments using approximate K
 	# TODO Your code goes here
+    zvp, vpz_inlier, vpz_outlier = FindVP(lines[:,:4], K_apprx)
 
+    if SAVE_IMGS:
+        im_vp = np.copy(im)
+        for i in range(vpz_inlier.shape[0]):
+            x1, y1, x2, y2 = vpz_inlier[i]
+            cv2.line(im_vp, (int(zvp[0]),int(zvp[1])), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.circle(im_vp, (int(zvp[0]), int(zvp[1])), 5, (0, 0, 255), -1)
+        cv2.imwrite('airport_vpz.jpg', im_vp)
+
+        # save the outliers
+        im_outlier = np.copy(im)
+        for i in range(vpz_outlier.shape[0]):
+            x1, y1, x2, y2 = vpz_outlier[i]
+            cv2.line(im_outlier, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+        cv2.imwrite('airport_vpzoutliers.jpg', im_outlier)
+    
+    
 	#####################################################################
     # Cluster the rest of line segments into two major directions and compute the x- and y-directional vanishing points using approximate K
 	# TODO Your code goes here
+    lines_x, lines_y = ClusterLines(vpz_outlier)
+
+    #viualize the x and y linesegment
+    if SAVE_IMGS:
+        im_vp = np.copy(im)
+        for i in range(lines_x.shape[0]):
+            x1, y1, x2, y2 = lines_x[i]
+            cv2.line(im_vp, (int(x1),int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.imwrite('airport_lines_x.jpg', im_vp)
+
+        im_vp = np.copy(im)
+        for i in range(lines_y.shape[0]):
+            x1, y1, x2, y2 = lines_y[i]
+            cv2.line(im_vp, (int(x1),int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.imwrite('airport_lines_y.jpg', im_vp)
+
+    # Compute the x- and y-directional vanishing points
+    xvp, vpx_inlier,_= FindVP(lines_x, K_apprx)
+    yvp, vpy_inlier,_= FindVP(lines_y, K_apprx, 0.1)
+
+    #visualize the x and y vanishing point
+    if SAVE_IMGS:
+        im_vp = np.copy(im)
+        for i in range(vpx_inlier.shape[0]):
+            x1, y1, x2, y2 = vpx_inlier[i]
+            cv2.line(im_vp, (int(xvp[0]),int(xvp[1])), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.circle(im_vp, (int(xvp[0]), int(xvp[1])), 5, (0, 0, 255), -1)
+        cv2.imwrite('airport_vpx.jpg', im_vp)
+
+        im_vp = np.copy(im)
+        for i in range(vpy_inlier.shape[0]):
+            x1, y1, x2, y2 = vpy_inlier[i]
+            cv2.line(im_vp, (int(yvp[0]),int(yvp[1])), (int(x2), int(y2)), (0, 255, 0), 2)
+        cv2.circle(im_vp, (int(yvp[0]), int(yvp[1])), 5, (0, 0, 255), -1)
+        cv2.imwrite('airport_vpy.jpg', im_vp)
+
+        
 
 	#####################################################################
     # Calibrate K 
     # TODO Your code goes here
+    K = CalibrateCamera(xvp, yvp, zvp)
+
 
 	#####################################################################
     # Compute the rectiﬁcation homography
