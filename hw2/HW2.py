@@ -258,6 +258,10 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     U11, U12, U21, U22, V11, V12, V21, V22 : ndarray of shape (3,)
         The 8 corners of the box
     """
+    vp_z = np.array([vp_z[0], vp_z[1], 1])
+    vp_x = np.array([vp_x[0], vp_x[1], 1])
+    vp_y = np.array([vp_y[0], vp_y[1], 1])
+
     z_direction = np.linalg.inv(K) @ vp_z / np.linalg.norm(np.linalg.inv(K) @ vp_z)
     x_direction = np.linalg.inv(K) @ vp_x
     y_direction = np.linalg.inv(K) @ vp_y
@@ -286,7 +290,6 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     V21 = near_center - H/2 * x_direction + W/2 * y_direction
     V22 = near_center - H/2 * x_direction - W/2 * y_direction
     
-    # 그람 슈미트 보정을 추가 해야 할 수 도 있음
     return U11, U12, U21, U22, V11, V12, V21, V22
 
 def Rotation2Quaternion(R):
@@ -340,8 +343,7 @@ def Quaternion2Rotation(q):
     R[2,2] = 1 - 2*q[1]**2 - 2*q[2]**2
 
     return R
-    # TODO Your code goes here
-
+    
 def InterpolateCameraPose(R1, C1, R2, C2, w):
     """
     Interpolate the camera pose
@@ -370,7 +372,7 @@ def InterpolateCameraPose(R1, C1, R2, C2, w):
     q2 = Rotation2Quaternion(R2)
     q = q1 * (1 - w) + q2 * w
     Ri = Quaternion2Rotation(q)
-    
+
     Ci = w * C1 + (1 - w) * C2
     
     return Ri, Ci
@@ -526,7 +528,15 @@ if __name__ == '__main__':
     far_depth = 4
 
 	# TODO Your code goes here
-    U11, U12, U21, U22, V11, V12, V21, V22 = ConstructBox(K, vp_x, vp_y, vp_z, W, aspect_ratio, near_depth, far_depth)
+    U11, U12, U21, U22, V11, V12, V21, V22 = ConstructBox(K, xvp, yvp, zvp, W, aspect_ratio, near_depth, far_depth)
+    U11 = 
+    if SAVE_IMGS:
+        im_box = np.copy(im)
+        for U, V in [(U11, U12), (U12, U22), (U22, U21), (U21, U11), (V11, V12), (V12, V22), (V22, V21), (V21, V11)]:
+            U = U / U[2]
+            V = V / V[2]
+            cv2.line(im_box, (int(U[0]), int(U[1])), (int(V[0]), int(V[1])), (0, 255, 0), 2)
+        cv2.imwrite('airport_box.jpg', im_box)
     
 	#####################################################################
     # The sequence of camera poses
@@ -559,5 +569,19 @@ if __name__ == '__main__':
 
 
 	#####################################################################
-    # Render images from the interpolated virtual camera poses 
-	# TODO Your code goes here
+    # Render images from the interpolated virtual camera poses
+interpol_num = 10
+
+
+
+rotations = []
+centers = []
+for i in range(len(R_list) - 1):
+    for j in range(interpol_num):
+        w = j / interpol_num
+        Ri, Ci = InterpolateCameraPose(R_list[i], C_list[i], R_list[i+1], C_list[i+1], w)
+        rotations.append(Ri)
+        centers.append(Ci)
+
+for i in range(len(rotations)):
+    pass
