@@ -134,7 +134,6 @@ def ClusterLines(lines):
 
     return lines_x, lines_y
 
-
 def CalibrateCamera(vp_x, vp_y, vp_z):
     """
     Calibrate intrinsic parameters
@@ -153,9 +152,23 @@ def CalibrateCamera(vp_x, vp_y, vp_z):
     K : ndarray of shape (3, 3)
         The camera intrinsic parameters
     """
-
     # TODO Your code goes here
-    pass
+    A = np.array([
+        [vp_x[0]*vp_y[0]+vp_x[1]*vp_y[1],vp_x[0] + vp_y[0],vp_x[1] + vp_y[1],1],
+        [vp_z[0]*vp_y[0]+vp_z[1]*vp_y[1],vp_y[0] + vp_z[0],vp_y[1] + vp_z[1],1],
+        [vp_x[0]*vp_z[0]+vp_x[1]*vp_z[1],vp_x[0] + vp_z[0],vp_x[1] + vp_z[1],1]
+    ])
+    _,_,V = np.linalg.svd(A)
+    b = V[-1,:]
+    px = -b[1]/b[0]
+    py = -b[2]/b[0]
+    f = np.sqrt(b[3]/b[0] - (px**2 + py**2))
+    K = np.array([
+        [f, 0, px],
+        [0, f, py],
+        [0, 0, 1]
+    ])
+    return K
 
 
 def GetRectificationH(K, vp_x, vp_y, vp_z):
@@ -180,7 +193,20 @@ def GetRectificationH(K, vp_x, vp_y, vp_z):
     """
     
     # TODO Your code goes here
-    pass
+    vp_x = np.array([vp_x[0], vp_x[1], 1])
+    vp_y = np.array([vp_y[0], vp_y[1], 1])
+    vp_z = np.array([vp_z[0], vp_z[1], 1])
+
+    n_vp_x = np.linalg.inv(K) @ vp_x / np.linalg.norm(np.linalg.inv(K) @ vp_x)
+    n_vp_y = np.linalg.inv(K) @ vp_y / np.linalg.norm(np.linalg.inv(K) @ vp_y)
+    n_vp_z = np.linalg.inv(K) @ vp_z / np.linalg.norm(np.linalg.inv(K) @ vp_z)
+
+    basis = np.array([n_vp_x, n_vp_y, n_vp_z])
+    new_basis = np.array([[1,0,0],[0,1,0],[0,0,1]])
+    R = basis @ np.linalg.inv(new_basis)
+
+    H_rect = K @ R @ np.linalg.inv(K)
+    return H_rect
 
 
 def ImageWarping(im, H):
@@ -201,7 +227,7 @@ def ImageWarping(im, H):
     """
     
     # TODO Your code goes here
-    pass
+    return cv2.warpPerspective(im, H, (im.shape[1], im.shape[0]))
 
 
 def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
@@ -232,10 +258,89 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     U11, U12, U21, U22, V11, V12, V21, V22 : ndarray of shape (3,)
         The 8 corners of the box
     """
+    z_direction = np.linalg.inv(K) @ vp_z / np.linalg.norm(np.linalg.inv(K) @ vp_z)
+    x_direction = np.linalg.inv(K) @ vp_x
+    y_direction = np.linalg.inv(K) @ vp_y
+
+    #그람 슈미트 보정
+    x_direction = x_direction - np.dot(x_direction, z_direction) * z_direction
+    y_direction = y_direction - np.dot(y_direction, z_direction) * z_direction
+
+    #정규화
+    x_direction = x_direction / np.linalg.norm(x_direction)
+    y_direction = y_direction / np.linalg.norm(y_direction)
+
+    H = W / a
+
+    # U
+    far_center = d_far * np.linalg.inv(K) @ z_direction
+    U11 = far_center + H/2 * x_direction + W/2 * y_direction
+    U12 = far_center + H/2 * x_direction - W/2 * y_direction
+    U21 = far_center - H/2 * x_direction + W/2 * y_direction
+    U22 = far_center - H/2 * x_direction - W/2 * y_direction
+
+    # V
+    near_center = d_near * np.linalg.inv(K) @ z_direction
+    V11 = near_center + H/2 * x_direction + W/2 * y_direction
+    V12 = near_center + H/2 * x_direction - W/2 * y_direction
+    V21 = near_center - H/2 * x_direction + W/2 * y_direction
+    V22 = near_center - H/2 * x_direction - W/2 * y_direction
+    
+    # 그람 슈미트 보정을 추가 해야 할 수 도 있음
+    return U11, U12, U21, U22, V11, V12, V21, V22
+
+def Rotation2Quaternion(R):
+    """
+    Convert a rotation matrix to quaternion
+    
+    Parameters
+    ----------
+    R : ndarray of shape (3, 3)
+        Rotation matrix
+
+    Returns
+    -------
+    q : ndarray of shape (4,)
+        The unit quaternion (w, x, y, z)
+    """
     
     # TODO Your code goes here
-    pass
+    q = np.zeros(4)
+    q[0] = np.sqrt(1 + R[0,0] + R[1,1] + R[2,2]) / 2
+    q[1] = (R[2,1] - R[1,2]) / (4 * q[0])
+    q[2] = (R[0,2] - R[2,0]) / (4 * q[0])
+    q[3] = (R[1,0] - R[0,1]) / (4 * q[0])
+    return q
 
+def Quaternion2Rotation(q):
+    """
+    Convert a quaternion to rotation matrix
+    
+    Parameters
+    ----------
+    q : ndarray of shape (4,)
+        Unit quaternion (w, x, y, z)
+
+    Returns
+    -------
+    R : ndarray of shape (3, 3)
+        The rotation matrix
+    """
+    R = np.zeros((3, 3))
+    R[0,0] = 1 - 2*q[2]**2 - 2*q[3]**2
+    R[0,1] = 2*q[1]*q[2] - 2*q[0]*q[3]
+    R[0,2] = 2*q[1]*q[3] + 2*q[0]*q[2]
+
+    R[1,0] = 2*q[1]*q[2] + 2*q[0]*q[3]
+    R[1,1] = 1 - 2*q[1]**2 - 2*q[3]**2
+    R[1,2] = 2*q[2]*q[3] - 2*q[0]*q[1]
+
+    R[2,0] = 2*q[1]*q[3] - 2*q[0]*q[2]
+    R[2,1] = 2*q[2]*q[3] + 2*q[0]*q[1]
+    R[2,2] = 1 - 2*q[1]**2 - 2*q[2]**2
+
+    return R
+    # TODO Your code goes here
 
 def InterpolateCameraPose(R1, C1, R2, C2, w):
     """
@@ -261,46 +366,14 @@ def InterpolateCameraPose(R1, C1, R2, C2, w):
     Ci : ndarray of shape (3,)
         The interpolated camera optical center
     """
+    q1 = Rotation2Quaternion(R1)
+    q2 = Rotation2Quaternion(R2)
+    q = q1 * (1 - w) + q2 * w
+    Ri = Quaternion2Rotation(q)
     
-    # TODO Your code goes here
-    pass
-
-
-def Rotation2Quaternion(R):
-    """
-    Convert a rotation matrix to quaternion
+    Ci = w * C1 + (1 - w) * C2
     
-    Parameters
-    ----------
-    R : ndarray of shape (3, 3)
-        Rotation matrix
-
-    Returns
-    -------
-    q : ndarray of shape (4,)
-        The unit quaternion (w, x, y, z)
-    """
-    
-    # TODO Your code goes here
-    pass
-
-def Quaternion2Rotation(q):
-    """
-    Convert a quaternion to rotation matrix
-    
-    Parameters
-    ----------
-    q : ndarray of shape (4,)
-        Unit quaternion (w, x, y, z)
-
-    Returns
-    -------
-    R : ndarray of shape (3, 3)
-        The rotation matrix
-    """
-
-    # TODO Your code goes here
-    pass
+    return Ri, Ci
 
 
 def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
@@ -425,21 +498,25 @@ if __name__ == '__main__':
         cv2.circle(im_vp, (int(yvp[0]), int(yvp[1])), 5, (0, 0, 255), -1)
         cv2.imwrite('airport_vpy.jpg', im_vp)
 
-        
 
 	#####################################################################
     # Calibrate K 
     # TODO Your code goes here
     K = CalibrateCamera(xvp, yvp, zvp)
 
-
 	#####################################################################
     # Compute the rectiﬁcation homography
     # TODO Your code goes here
+    H = GetRectificationH(K, xvp, yvp, zvp)
+    
+
 
 	#####################################################################
     # Rectify the input image and vanishing points
 	# TODO Your code goes here
+    warp_img = ImageWarping(im, H)
+    if SAVE_IMGS:
+        cv2.imwrite('airport_warped.jpg', warp_img)
 
 	#####################################################################
     # Construct 3D representation of the scene using a box model
@@ -447,7 +524,9 @@ if __name__ == '__main__':
     aspect_ratio = 2.5
     near_depth = 0.4
     far_depth = 4
+
 	# TODO Your code goes here
+    U11, U12, U21, U22, V11, V12, V21, V22 = ConstructBox(K, vp_x, vp_y, vp_z, W, aspect_ratio, near_depth, far_depth)
     
 	#####################################################################
     # The sequence of camera poses
