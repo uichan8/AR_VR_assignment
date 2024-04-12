@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 from pylsd import lsd
+import matplotlib.pyplot as plt
 
 np.random.seed(42)
 SAVE_IMGS = True
@@ -105,7 +106,6 @@ def FindVP(lines, K, ransac_thr = 0.04, ransac_iter = 5000):
 
     return vp_max, inlier, outlier
 
-
 def ClusterLines(lines):
     """
     Cluster lines into two sets
@@ -170,7 +170,6 @@ def CalibrateCamera(vp_x, vp_y, vp_z):
     ])
     return K
 
-
 def GetRectificationH(K, vp_x, vp_y, vp_z):
     """
     Find a homography for rectification
@@ -206,8 +205,8 @@ def GetRectificationH(K, vp_x, vp_y, vp_z):
     R = basis @ np.linalg.inv(new_basis)
 
     H_rect = K @ R @ np.linalg.inv(K)
-    return H_rect
 
+    return H_rect
 
 def ImageWarping(im, H):
     """
@@ -228,7 +227,6 @@ def ImageWarping(im, H):
     
     # TODO Your code goes here
     return cv2.warpPerspective(im, H, (im.shape[1], im.shape[0]))
-
 
 def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     """
@@ -274,21 +272,43 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     x_direction = x_direction / np.linalg.norm(x_direction)
     y_direction = y_direction / np.linalg.norm(y_direction)
 
+    #imgae 좌표계로 변환
+
     H = W / a
 
     # U
-    far_center = d_far * np.linalg.inv(K) @ z_direction
+    far_center = d_far * z_direction
     U11 = far_center + H/2 * x_direction + W/2 * y_direction
     U12 = far_center + H/2 * x_direction - W/2 * y_direction
     U21 = far_center - H/2 * x_direction + W/2 * y_direction
     U22 = far_center - H/2 * x_direction - W/2 * y_direction
 
     # V
-    near_center = d_near * np.linalg.inv(K) @ z_direction
+    near_center = d_near *  z_direction
     V11 = near_center + H/2 * x_direction + W/2 * y_direction
     V12 = near_center + H/2 * x_direction - W/2 * y_direction
     V21 = near_center - H/2 * x_direction + W/2 * y_direction
     V22 = near_center - H/2 * x_direction - W/2 * y_direction
+
+    #각 포인트 normalizing
+    U11 = U11 / U11[2]
+    U12 = U12 / U12[2]
+    U21 = U21 / U21[2]
+    U22 = U22 / U22[2]
+    V11 = V11 / V11[2]
+    V12 = V12 / V12[2]
+    V21 = V21 / V21[2]
+    V22 = V22 / V22[2]
+
+    #이미지 좌표계로 변환
+    # U11 = K @ U11 / U11[2]
+    # U12 = K @ U12 / U12[2]
+    # U21 = K @ U21 / U21[2]
+    # U22 = K @ U22 / U22[2]
+    # V11 = K @ V11 / V11[2]
+    # V12 = K @ V12 / V12[2]
+    # V21 = K @ V21 / V21[2]
+    # V22 = K @ V22 / V22[2]
     
     return U11, U12, U21, U22, V11, V12, V21, V22
 
@@ -377,7 +397,6 @@ def InterpolateCameraPose(R1, C1, R2, C2, w):
     
     return Ri, Ci
 
-
 def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
     """
     Interpolate the camera pose
@@ -394,7 +413,7 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
         Camera intrinsic parameters
     R : ndarray of shape (3, 3)
         Camera rotation matrix
-    C : ndarray of shape (3,)
+    t : ndarray of shape (3,)
         Camera optical center
     vx : ndarray of shape (h, w)
         All x coordinates in the image
@@ -409,9 +428,51 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
         The binary mask indicating membership to the plane constructed by p11, 
         p12, and p21
     """
+
+    # vx, vy 로 그리드를 생성
+    w = len(vx)
+    h = len(vy)
+    vx, vy = np.meshgrid(vx, vy)
+    vx = vx.flatten()
+    vy = vy.flatten()
+    v = np.vstack([vx, vy, np.ones(vx.shape)])
+
+    # 그리드를 카메라 좌표계로 변환
+    p = np.linalg.inv(K) @ v
+
+    p22 = p21 + p12 - p11
+    px_max = max(p11[0], p12[0], p21[0], p22[0])
+    px_min = min(p11[0], p12[0], p21[0], p22[0])
+    py_max = max(p11[1], p12[1], p21[1], p22[1])
+    py_min = min(p11[1], p12[1], p21[1], p22[1])
     
-    # TODO Your code goes here
-    pass
+    #p 배열이서 p11, p12, p21, p22 사각형 안에 있는 점들만 님기기 #그냥 직사각형이라고 가정
+    new_p = []
+    for i in range(p.shape[1]):
+        if p[0,i] >= px_min and p[0,i] <= px_max and p[1,i] >= py_min and p[1,i] <= py_max:
+            new_p.append(p[:,i])
+    new_p = np.array(new_p).T
+
+    RC = np.hstack((R, -R @ C.reshape(-1,1)))
+
+    H = K @ RC
+    Hi = H[:, :3]
+    H = Hi @ np.linalg.inv(K)
+
+    new_p = Hi @ new_p
+    new_p = new_p / new_p[2,:]
+
+    canvas = np.zeros((h, w))
+    for i in range(new_p.shape[1]):
+        x,y = new_p[0,i], new_p[1,i]
+        if x < 0 or x >= w or y < 0 or y >= h:
+            continue
+        canvas[int(y), int(x)] = 1
+        
+        
+    visibility_mask = canvas
+    return H ,visibility_mask
+
 
 SAVE_RESULT = True
 
@@ -523,20 +584,34 @@ if __name__ == '__main__':
 	#####################################################################
     # Construct 3D representation of the scene using a box model
     W = 1
-    aspect_ratio = 2.5
-    near_depth = 0.4
+    aspect_ratio = 1/2.5
+    near_depth = 1.4
     far_depth = 4
 
 	# TODO Your code goes here
     U11, U12, U21, U22, V11, V12, V21, V22 = ConstructBox(K, xvp, yvp, zvp, W, aspect_ratio, near_depth, far_depth)
-    U11 = 
-    if SAVE_IMGS:
-        im_box = np.copy(im)
-        for U, V in [(U11, U12), (U12, U22), (U22, U21), (U21, U11), (V11, V12), (V12, V22), (V22, V21), (V21, V11)]:
-            U = U / U[2]
-            V = V / V[2]
-            cv2.line(im_box, (int(U[0]), int(U[1])), (int(V[0]), int(V[1])), (0, 255, 0), 2)
-        cv2.imwrite('airport_box.jpg', im_box)
+
+    # if SAVE_IMGS:
+    #     im_box = np.copy(im)
+    #     cv2.line(im_box, (int(U11[0]), int(U11[1])), (int(V11[0]), int(V11[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(U12[0]), int(U12[1])), (int(V12[0]), int(V12[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(U21[0]), int(U21[1])), (int(V21[0]), int(V21[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(U22[0]), int(U22[1])), (int(V22[0]), int(V22[1])), (0, 255, 0), 2)
+
+    #     cv2.line(im_box, (int(U11[0]), int(U11[1])), (int(U12[0]), int(U12[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(U21[0]), int(U21[1])), (int(U22[0]), int(U22[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(V11[0]), int(V11[1])), (int(V12[0]), int(V12[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(V21[0]), int(V21[1])), (int(V22[0]), int(V22[1])), (0, 255, 0), 2)
+
+    #     cv2.line(im_box, (int(U12[0]), int(U12[1])), (int(U22[0]), int(U22[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(U11[0]), int(U11[1])), (int(U21[0]), int(U21[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(V12[0]), int(V12[1])), (int(V22[0]), int(V22[1])), (0, 255, 0), 2)
+    #     cv2.line(im_box, (int(V11[0]), int(V11[1])), (int(V21[0]), int(V21[1])), (0, 255, 0), 2)
+        
+    #     cv2.imwrite('airport_box.jpg', im_box)
+    #     im_box_warp = ImageWarping(im_box, H)
+    #     cv2.imwrite('airport_box_warped.jpg', im_box_warp)
+    
     
 	#####################################################################
     # The sequence of camera poses
@@ -570,18 +645,37 @@ if __name__ == '__main__':
 
 	#####################################################################
     # Render images from the interpolated virtual camera poses
-interpol_num = 10
 
 
+    interpol_num = 5
+    rotations = []
+    centers = []
+    for i in range(len(R_list) - 1):
+        for j in range(interpol_num):
+            w = j / interpol_num
+            Ri, Ci = InterpolateCameraPose(R_list[i], C_list[i], R_list[i+1], C_list[i+1], w)
+            rotations.append(Ri)
+            centers.append(Ci)
 
-rotations = []
-centers = []
-for i in range(len(R_list) - 1):
-    for j in range(interpol_num):
-        w = j / interpol_num
-        Ri, Ci = InterpolateCameraPose(R_list[i], C_list[i], R_list[i+1], C_list[i+1], w)
-        rotations.append(Ri)
-        centers.append(Ci)
+    for i in range(len(rotations)):
+        canvas = np.zeros((im_h, im_w, 3))
+        H, visibility_mask = GetPlaneHomography(U11, U12, U21, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane1 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas += plane1
 
-for i in range(len(rotations)):
-    pass
+        H, visibility_mask = GetPlaneHomography(V11, V12, U11, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane2 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane2
+        canvas = canvas
+
+        # H, visibility_mask = GetPlaneHomography(U22, V22, U12, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        # plane3 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        # canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        # canvas += plane3
+        # canvas = canvas.astype(np.uint8)
+
+        if SAVE_RESULT:
+            cv2.imwrite(f'results/airport_rendered_{ str(100+i)[1:]}.jpg', canvas)
+        
+
