@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 np.random.seed(42)
 SAVE_IMGS = True
 
+
 def DistLine2Point(line, point):
     """
     Compute the distance from a line segment to a point
@@ -290,15 +291,15 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     V21 = near_center - H/2 * x_direction + W/2 * y_direction
     V22 = near_center - H/2 * x_direction - W/2 * y_direction
 
-    #각 포인트 normalizing
-    U11 = U11 / U11[2]
-    U12 = U12 / U12[2]
-    U21 = U21 / U21[2]
-    U22 = U22 / U22[2]
-    V11 = V11 / V11[2]
-    V12 = V12 / V12[2]
-    V21 = V21 / V21[2]
-    V22 = V22 / V22[2]
+    # #각 포인트 normalizing
+    # U11 = U11 / U11[2]
+    # U12 = U12 / U12[2]
+    # U21 = U21 / U21[2]
+    # U22 = U22 / U22[2]
+    # V11 = V11 / V11[2]
+    # V12 = V12 / V12[2]
+    # V21 = V21 / V21[2]
+    # V22 = V22 / V22[2]
 
     #이미지 좌표계로 변환
     # U11 = K @ U11 / U11[2]
@@ -397,6 +398,33 @@ def InterpolateCameraPose(R1, C1, R2, C2, w):
     
     return Ri, Ci
 
+def is_left(a, b, c):
+    """Return true if point c is on the left side of the line formed by points a and b"""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0
+
+def is_right(a, b, c):
+    """Return true if point c is on the right side of the line formed by points a and b"""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) < 0
+
+def is_point_in_rectangle(rect, point):
+    """Check if point is inside the rectangle defined by 4 points.
+       The rectangle points must be given in any order, function adjusts for orientation."""
+    a, b, c, d = rect
+    
+    # Check the orientation of the rectangle by using the cross product of the first two edges
+    if is_left(a, b, c):
+        # Counter-clockwise order
+        return (is_left(a, b, point) and
+                is_left(b, c, point) and
+                is_left(c, d, point) and
+                is_left(d, a, point))
+    else:
+        # Clockwise order
+        return (is_right(a, b, point) and
+                is_right(b, c, point) and
+                is_right(c, d, point) and
+                is_right(d, a, point))
+
 def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
     """
     Interpolate the camera pose
@@ -437,22 +465,25 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
     vy = vy.flatten()
     v = np.vstack([vx, vy, np.ones(vx.shape)])
 
-    # 그리드를 카메라 좌표계로 변환
+    # 이미지 좌표계의 그리드를 카메라 좌표계로 변환
     p = np.linalg.inv(K) @ v
 
+    #p22 구하기
     p22 = p21 + p12 - p11
-    px_max = max(p11[0], p12[0], p21[0], p22[0])
-    px_min = min(p11[0], p12[0], p21[0], p22[0])
-    py_max = max(p11[1], p12[1], p21[1], p22[1])
-    py_min = min(p11[1], p12[1], p21[1], p22[1])
-    
-    #p 배열이서 p11, p12, p21, p22 사각형 안에 있는 점들만 님기기 #그냥 직사각형이라고 가정
+
+    #p11, p12, p21, p22 를 z축이 1이 되도록 projection
+    np11 = p11 / p11[2]
+    np12 = p12 / p12[2]
+    np21 = p21 / p21[2]
+    np22 = p22 / p22[2]
+
+    #v에서 4개의 p점을 꼭짓점으로 하는 사다리꼴 안에 있는 점들만 남기기
     new_p = []
     for i in range(p.shape[1]):
-        if p[0,i] >= px_min and p[0,i] <= px_max and p[1,i] >= py_min and p[1,i] <= py_max:
+        if is_point_in_rectangle([np11[:2], np12[:2], np22[:2], np21[:2]], p[:2,i]):
             new_p.append(p[:,i])
-    new_p = np.array(new_p).T
 
+    new_p = np.array(new_p).T
     RC = np.hstack((R, -R @ C.reshape(-1,1)))
 
     H = K @ RC
@@ -474,7 +505,6 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
     return H ,visibility_mask
 
 
-SAVE_RESULT = True
 
 if __name__ == '__main__':
 
@@ -669,13 +699,46 @@ if __name__ == '__main__':
         canvas += plane2
         canvas = canvas
 
-        # H, visibility_mask = GetPlaneHomography(U22, V22, U12, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
-        # plane3 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
-        # canvas *= 1 - visibility_mask[:,:,np.newaxis]
-        # canvas += plane3
-        # canvas = canvas.astype(np.uint8)
+        H, visibility_mask = GetPlaneHomography(U22, V22, U12, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane3 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane3
+        canvas = canvas.astype(np.uint8)
 
-        if SAVE_RESULT:
+        nU11 = H @K@ U11
+        nU12 = H @K@ U12
+        nU21 = H @K@ U21
+        nU22 = H @K@ U22
+        nV11 = H @K@ V11
+        nV12 = H @K@ V12
+        nV21 = H @K@ V21
+        nV22 = H @K@ V22
+        nV11 = nV11 / nV11[2]
+        nV12 = nV12 / nV12[2]
+        nV21 = nV21 / nV21[2]
+        nV22 = nV22 / nV22[2]
+        nU11 = nU11 / nU11[2]
+        nU12 = nU12 / nU12[2]
+        nU21 = nU21 / nU21[2]
+        nU22 = nU22 / nU22[2]
+
+        cv2.line(canvas, (int(nU11[0]), int(nU11[1])), (int(nV11[0]), int(nV11[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nU12[0]), int(nU12[1])), (int(nV12[0]), int(nV12[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nU21[0]), int(nU21[1])), (int(nV21[0]), int(nV21[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nU22[0]), int(nU22[1])), (int(nV22[0]), int(nV22[1]),), (0, 255, 0), 2)
+
+        cv2.line(canvas, (int(nU11[0]), int(nU11[1])), (int(nU12[0]), int(nU12[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nU21[0]), int(nU21[1])), (int(nU22[0]), int(nU22[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nV11[0]), int(nV11[1])), (int(nV12[0]), int(nV12[1]),), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nV21[0]), int(nV21[1])), (int(nV22[0]), int(nV22[1]),), (0, 255, 0), 2)
+
+        cv2.line(canvas, (int(nU12[0]), int(nU12[1])), (int(nU22[0]), int(nU22[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nU11[0]), int(nU11[1])), (int(nU21[0]), int(nU21[1])), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nV12[0]), int(nV12[1])), (int(nV22[0]), int(nV22[1]),), (0, 255, 0), 2)
+        cv2.line(canvas, (int(nV11[0]), int(nV11[1])), (int(nV21[0]), int(nV21[1]),), (0, 255, 0), 2)
+
+
+        if SAVE_IMGS:
             cv2.imwrite(f'results/airport_rendered_{ str(100+i)[1:]}.jpg', canvas)
         
 
