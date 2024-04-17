@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from pylsd import lsd
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 np.random.seed(42)
 SAVE_IMGS = True
@@ -28,7 +29,6 @@ def DistLine2Point(line, point):
     dist = np.abs((y2 - y1) * point[0] - (x2 - x1) * point[1] + x2 * y1 - y2 * x1) / np.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2)
     return dist
     
-
 def FindVP(lines, K, ransac_thr = 0.04, ransac_iter = 5000):
     """
     Find the vanishing point
@@ -290,26 +290,6 @@ def ConstructBox(K, vp_x, vp_y, vp_z, W, a, d_near, d_far):
     V12 = near_center + H/2 * x_direction - W/2 * y_direction
     V21 = near_center - H/2 * x_direction + W/2 * y_direction
     V22 = near_center - H/2 * x_direction - W/2 * y_direction
-
-    # #각 포인트 normalizing
-    # U11 = U11 / U11[2]
-    # U12 = U12 / U12[2]
-    # U21 = U21 / U21[2]
-    # U22 = U22 / U22[2]
-    # V11 = V11 / V11[2]
-    # V12 = V12 / V12[2]
-    # V21 = V21 / V21[2]
-    # V22 = V22 / V22[2]
-
-    #이미지 좌표계로 변환
-    # U11 = K @ U11 / U11[2]
-    # U12 = K @ U12 / U12[2]
-    # U21 = K @ U21 / U21[2]
-    # U22 = K @ U22 / U22[2]
-    # V11 = K @ V11 / V11[2]
-    # V12 = K @ V12 / V12[2]
-    # V21 = K @ V21 / V21[2]
-    # V22 = K @ V22 / V22[2]
     
     return U11, U12, U21, U22, V11, V12, V21, V22
 
@@ -330,7 +310,7 @@ def Rotation2Quaternion(R):
     
     # TODO Your code goes here
     q = np.zeros(4)
-    q[0] = np.sqrt(1 + R[0,0] + R[1,1] + R[2,2]) / 2
+    q[0] = np.sqrt(1 + R[0,0] + R[1,1] + R[2,2]) / 2 
     q[1] = (R[2,1] - R[1,2]) / (4 * q[0])
     q[2] = (R[0,2] - R[2,0]) / (4 * q[0])
     q[3] = (R[1,0] - R[0,1]) / (4 * q[0])
@@ -391,10 +371,11 @@ def InterpolateCameraPose(R1, C1, R2, C2, w):
     """
     q1 = Rotation2Quaternion(R1)
     q2 = Rotation2Quaternion(R2)
-    q = q1 * (1 - w) + q2 * w
+    theta = np.arccos(np.dot(q1, q2))
+    q = q1 * np.cos(theta * w) + (q2 - q1)*np.cos(theta)/np.sin(theta) * np.sin(theta * w)
     Ri = Quaternion2Rotation(q)
 
-    Ci = w * C1 + (1 - w) * C2
+    Ci = (1 - w) * C1 + w * C2
     
     return Ri, Ci
 
@@ -457,51 +438,68 @@ def GetPlaneHomography(p11, p12, p21, K, R, C, vx, vy):
         p12, and p21
     """
 
+    #p22 구하기
+    p22 = p21 + p12 - p11
+
+    #np점들 이미지 좌표계로
+    np11 = K @ p11
+    np12 = K @ p12
+    np21 = K @ p21
+    np22 = K @ p22
+
+    #p11, p12, p21, p22 를 z축이 1이 되도록 scale projection
+    np11 = np11 / np.abs(np11[2])
+    np12 = np12 / np.abs(np12[2])
+    np21 = np21 / np.abs(np21[2])
+    np22 = np22 / np.abs(np22[2])
+
+    #p11, p12 ,p21, p22를 회전 및 이동, 근데 기존 R과 반대로 회전해야함
+    iR = np.linalg.inv(R)
+    mp11 = iR @ (p11 - C)
+    mp12 = iR @ (p12 - C)
+    mp21 = iR @ (p21 - C)
+    mp22 = iR @ (p22 - C)
+
+    #mp점들 이미지 좌표계로
+    mp11 = K @ mp11
+    mp12 = K @ mp12
+    mp21 = K @ mp21
+    mp22 = K @ mp22
+
+    #mp 점들 scale projection
+    mp11 = mp11 / np.abs(mp11[2])
+    mp12 = mp12 / np.abs(mp12[2])
+    mp21 = mp21 / np.abs(mp21[2])
+    mp22 = mp22 / np.abs(mp22[2])
+
     # vx, vy 로 그리드를 생성
     w = len(vx)
     h = len(vy)
     vx, vy = np.meshgrid(vx, vy)
     vx = vx.flatten()
     vy = vy.flatten()
-    v = np.vstack([vx, vy, np.ones(vx.shape)])
-
-    # 이미지 좌표계의 그리드를 카메라 좌표계로 변환
-    p = np.linalg.inv(K) @ v
-
-    #p22 구하기
-    p22 = p21 + p12 - p11
-
-    #p11, p12, p21, p22 를 z축이 1이 되도록 projection
-    np11 = p11 / p11[2]
-    np12 = p12 / p12[2]
-    np21 = p21 / p21[2]
-    np22 = p22 / p22[2]
+    v = np.vstack((vx, vy))
 
     #v에서 4개의 p점을 꼭짓점으로 하는 사다리꼴 안에 있는 점들만 남기기
     new_p = []
-    for i in range(p.shape[1]):
-        if is_point_in_rectangle([np11[:2], np12[:2], np22[:2], np21[:2]], p[:2,i]):
-            new_p.append(p[:,i])
+    for i in range(v.shape[1]):
+        if is_point_in_rectangle([mp11[:2], mp12[:2], mp22[:2], mp21[:2]], v[:,i]):
+            new_p.append(v[:,i])
 
     new_p = np.array(new_p).T
-    RC = np.hstack((R, -R @ C.reshape(-1,1)))
 
-    H = K @ RC
-    Hi = H[:, :3]
-    H = Hi @ np.linalg.inv(K)
+    visibility_mask = np.zeros((h, w))
+    if not len(new_p) == 0:
+        for i in range(new_p.shape[1]):
+            x,y = new_p[0,i], new_p[1,i]
+            if x < 0 or x >= w or y < 0 or y >= h:
+                continue
+            visibility_mask[int(y), int(x)] = 1
 
-    new_p = Hi @ new_p
-    new_p = new_p / new_p[2,:]
-
-    canvas = np.zeros((h, w))
-    for i in range(new_p.shape[1]):
-        x,y = new_p[0,i], new_p[1,i]
-        if x < 0 or x >= w or y < 0 or y >= h:
-            continue
-        canvas[int(y), int(x)] = 1
+    pts_src = np.array([np11[:2], np12[:2], np22[:2], np21[:2]])
+    pts_dst = np.array([mp11[:2], mp12[:2], mp22[:2], mp21[:2]])
+    H,_ = cv2.findHomography(pts_src, pts_dst)
         
-        
-    visibility_mask = canvas
     return H ,visibility_mask
 
 
@@ -677,7 +675,7 @@ if __name__ == '__main__':
     # Render images from the interpolated virtual camera poses
 
 
-    interpol_num = 5
+    interpol_num = 10
     rotations = []
     centers = []
     for i in range(len(R_list) - 1):
@@ -687,40 +685,54 @@ if __name__ == '__main__':
             rotations.append(Ri)
             centers.append(Ci)
 
-    for i in range(len(rotations)):
+    for i in tqdm(range(len(rotations))):
+        if i == 20:
+            pass
         canvas = np.zeros((im_h, im_w, 3))
         H, visibility_mask = GetPlaneHomography(U11, U12, U21, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
         plane1 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
         canvas += plane1
 
-        H, visibility_mask = GetPlaneHomography(V11, V12, U11, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
-        plane2 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
-        canvas *= 1 - visibility_mask[:,:,np.newaxis]
-        canvas += plane2
-        canvas = canvas
-
-        H, visibility_mask = GetPlaneHomography(U22, V22, U12, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
-        plane3 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
-        canvas *= 1 - visibility_mask[:,:,np.newaxis]
-        canvas += plane3
-        canvas = canvas.astype(np.uint8)
-
         nU11 = H @K@ U11
         nU12 = H @K@ U12
         nU21 = H @K@ U21
         nU22 = H @K@ U22
+
+        H, visibility_mask = GetPlaneHomography(U12, V12, U22, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane2 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane2
+        
+        H, visibility_mask = GetPlaneHomography(U11, U12, V11, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane3 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane3
+
         nV11 = H @K@ V11
         nV12 = H @K@ V12
-        nV21 = H @K@ V21
+
+        H, visibility_mask = GetPlaneHomography(V11, V21, U11, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane4 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane4
+
+        H, visibility_mask = GetPlaneHomography(U21, V21, U22, K, rotations[i], centers[i], np.arange(im_w), np.arange(im_h))
+        plane5 = (ImageWarping(im, H) * visibility_mask[:,:,np.newaxis]).astype(np.uint8)
+        canvas *= 1 - visibility_mask[:,:,np.newaxis]
+        canvas += plane5
+        canvas = canvas.astype(np.uint8)
+
         nV22 = H @K@ V22
-        nV11 = nV11 / nV11[2]
-        nV12 = nV12 / nV12[2]
-        nV21 = nV21 / nV21[2]
-        nV22 = nV22 / nV22[2]
-        nU11 = nU11 / nU11[2]
-        nU12 = nU12 / nU12[2]
-        nU21 = nU21 / nU21[2]
-        nU22 = nU22 / nU22[2]
+        nV21 = H @K@ V21
+
+        nV11 = nV11 / np.abs(nV11[2])
+        nV12 = nV12 / np.abs(nV12[2])
+        nV21 = nV21 / np.abs(nV21[2])
+        nV22 = nV22 / np.abs(nV22[2])
+        nU11 = nU11 / np.abs(nU11[2])
+        nU12 = nU12 / np.abs(nU12[2])
+        nU21 = nU21 / np.abs(nU21[2])
+        nU22 = nU22 / np.abs(nU22[2])
 
         cv2.line(canvas, (int(nU11[0]), int(nU11[1])), (int(nV11[0]), int(nV11[1])), (0, 255, 0), 2)
         cv2.line(canvas, (int(nU12[0]), int(nU12[1])), (int(nV12[0]), int(nV12[1])), (0, 255, 0), 2)
