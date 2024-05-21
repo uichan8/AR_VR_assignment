@@ -1,5 +1,7 @@
 numpy==1.19.5
+scikit-learn
 open3d==0.12.0
-opencv-python==3.4.2.16
-opencv-contrib-python==3.4.2.16
-scipy==1.5.4
+opencv-python==3.4.2.17
+opencv-contrib-python==3.4.2.17
+scipy
+
