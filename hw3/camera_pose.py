@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 from feature import EstimateE_RANSAC
 
@@ -71,15 +72,24 @@ def Triangulation(P1, P2, track1, track2):
     val_track2 = np.bitwise_not(track2 == -1)
     val_track2 = val_track2[:,0] + val_track2[:,1]
     val_track = val_track1 * val_track2
-    val_track = np.where(val_track == 2)
+    val_track = np.where(val_track)[0]
     track1_coor = track1[val_track]
     track2_coor = track2[val_track]
-    track1_coor = np.hstack((track1_coor, np.ones((track1_coor.shape[0],1))))
-    track2_coor = np.hstack((track2_coor, np.ones((track2_coor.shape[0],1))))
-
-    
-
-    X = None
+    X = []
+    for i in range(track1_coor.shape[0]):
+        x1,y1 = track1_coor[i]
+        x2,y2 = track2_coor[i]
+        A = np.array([
+            x1 * P1[2, :] - P1[0, :],
+            y1 * P1[2, :] - P1[1, :],
+            x2 * P2[2, :] - P2[0, :],
+            y2 * P2[2, :] - P2[1, :]
+        ])
+        U, S, Vt = np.linalg.svd(A)
+        X_temp = Vt[-1]
+        X_temp = X_temp / X_temp[3]
+        X.append(X_temp[:3])
+    X = np.array(X)
     return X
 
 
@@ -103,9 +113,15 @@ def EvaluateCheirality(P1, P2, X):
         The binary vector indicating the cheirality condition, i.e., the entry 
         is 1 if the point is in front of both cameras, and 0 otherwise
     """
-    
-    # TODO Your code goes here
+    X_h = np.hstack((X, np.ones((X.shape[0], 1))))
 
+    projection1 = P1 @ X_h.T
+    projection2 = P2 @ X_h.T
+
+    projection1_z = projection1[2, :]
+    projection2_z = projection2[2, :]
+
+    valid_index = (projection1_z > 0) & (projection2_z > 0)
     return valid_index
 
 
@@ -130,24 +146,36 @@ def EstimateCameraPose(track1, track2):
     X : ndarray of shape (F, 3)
         The set of reconstructed 3D points
     """
+    K = np.asarray([
+        [350, 0, 480],
+        [0, 350, 270],
+        [0, 0, 1]
+    ])
     # compute essential matrix
     E, _ = EstimateE_RANSAC(track1, track2)
 
     # Estimate four configurations of poses
     R_set, C_set = GetCameraPoseFromE(E)
 
+    val_max = 0
     for R,C in zip(R_set,C_set):
         # Triangulate points using for each configuration
         P1 = np.eye(3,4)
+        P1 = K@P1
         P2 = np.zeros((3,4))
         P2[:3,:3] = R
         P2[:,3] = C
         X = Triangulation(P1,P2,track1,track2)
+        # Evaluate cheirality
+        valid_index = EvaluateCheirality(P1,P2,X)
+        val = np.sum(valid_index)
+        if val > val_max:
+            val_max = val
+            R_best = R
+            C_best = C
+            X_best = X
 
-    
-
-
-    #return R, C, X
+    return R_best, C_best, X_best
 
 if __name__ == '__main__':
     from feature import BuildFeatureTrack
