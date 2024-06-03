@@ -35,7 +35,12 @@ if __name__ == '__main__':
         Im[i,:,:,:] = im
 
     # Build feature track
-    track = BuildFeatureTrack(Im, K)
+    LOAD = True
+    if LOAD:
+        track = np.load('result_npy/track.npy')
+    else:
+        track = BuildFeatureTrack(Im, K)
+        np.save('result_npy/track.npy', track)
 
     track1 = track[0,:,:]
     track2 = track[1,:,:]
@@ -50,7 +55,8 @@ if __name__ == '__main__':
     # Set of camera poses
     P = np.zeros((num_images, 3, 4))
     # Set first two camera poses
-    # TODO Your code goes here
+    
+    
 
     ransac_n_iter = 200
     ransac_thr = 0.01
@@ -73,6 +79,7 @@ if __name__ == '__main__':
 
             # Update 3D points
             # TODO Your code goes here
+            pass
         
         # Run bundle adjustment
         valid_ind = X[:, 0] != -1

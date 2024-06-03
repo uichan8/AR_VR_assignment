@@ -56,7 +56,50 @@ def Triangulation_nl(X, P1, P2, x1, x2):
 
     return X_new
 
+def jacobian_AB(A, B):
+    """
+    행렬 곱셈 C = A @ B에 대한 자코비안 행렬을 계산합니다.
+    
+    Parameters:
+        A: 입력 행렬 A (m x n)
+        B: 입력 행렬 B (n x p)
+        
+    Returns:
+        자코비안 행렬 J (mp x mn 크기의 2차원 배열)
+    """
+    m, n = A.shape
+    n, p = B.shape
+    J = np.zeros((m * p, m * n))
+    
+    for i in range(m):
+        for j in range(p):
+            for k in range(n):
+                # C_ij = sum_k A_ik B_kj 이므로 ∂C_ij/∂A_ik = B_kj
+                J[i * p + j, i * n + k] = B[k, j]
+                
+    return J
 
+def jacobian_BA(B, A):
+    """
+    행렬 B와 A의 곱셈에 대한 자코비안 행렬을 계산합니다.
+
+    Parameters:
+        B: 입력 행렬 B (p x m)
+        A: 입력 행렬 A (m x n)
+
+    Returns:
+        자코비안 행렬 J (p*n x m*n 크기의 2차원 배열)
+    """
+    p, m = B.shape
+    m, n = A.shape
+    J = np.zeros((p * n, m * n))
+    
+    for i in range(p):
+        for j in range(n):
+            for k in range(m):
+                J[i * n + j, k * n + j] = B[i, k]
+                
+    return J
 
 def ComputePointJacobian(X, p):
     """
@@ -75,11 +118,26 @@ def ComputePointJacobian(X, p):
         The point Jacobian
     """
     
-    # TODO Your code goes here
+    #forward pass
+    C = p[:3]
+    _C = np.eye(3,4)
+    _C[:3,3] = -C
+
+    q = p[3:]
+    R = Quaternion2Rotation(q)
+
+    _X = np.hstack((X,1))
+
+    B = R@_C@_X
+    _B = B/B[2]
+
+    #diff
+    d_B_dB = np.array([[1/B[2],0,-B[0]/B[2]**2],[0,1/B[2],-B[1]/B[2]**2],[0,0,0]])
+    dB_dX =  jacobian_BA(R@_C, _X[...,np.newaxis])
+    dfdX = d_B_dB @ dB_dX
+    dfdX = dfdX[:2,:3]
 
     return dfdX
-
-
 
 def SetupBundleAdjustment(P, X, track):
     """
