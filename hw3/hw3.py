@@ -14,7 +14,8 @@ from pnp import PnP_nl
 from reconstruction import FindMissingReconstruction
 from reconstruction import Triangulation_nl
 from reconstruction import RunBundleAdjustment
-
+from utils import get_matching_from_track
+np.random.seed(42)
 
 if __name__ == '__main__':
     K = np.asarray([
@@ -35,12 +36,7 @@ if __name__ == '__main__':
         Im[i,:,:,:] = im
 
     # Build feature track
-    LOAD = True
-    if LOAD:
-        track = np.load('result_npy/track.npy')
-    else:
-        track = BuildFeatureTrack(Im, K)
-        np.save('result_npy/track.npy', track)
+    track = BuildFeatureTrack(Im, K) #각각 이미지 좌표게에서의 좌표
 
     track1 = track[0,:,:]
     track2 = track[1,:,:]
@@ -54,10 +50,12 @@ if __name__ == '__main__':
 
     # Set of camera poses
     P = np.zeros((num_images, 3, 4))
-    # Set first two camera poses
-    
-    
 
+    # Set first two camera poses
+    P[0] = np.eye(3, 4)
+    P[1, :, :3] = R
+    P[1, :, 3] = -R @ C
+    
     ransac_n_iter = 200
     ransac_thr = 0.01
     for i in range(2, num_images):

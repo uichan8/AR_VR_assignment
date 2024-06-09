@@ -1,15 +1,8 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 from feature import EstimateE_RANSAC
+from utils import get_matching_from_track
 
-K = np.asarray([
-        [350, 0, 480],
-        [0, 350, 270],
-        [0, 0, 1]
-    ])
-
-SAVE_RESULT = True
 
 def GetCameraPoseFromE(E):
     """
@@ -55,9 +48,11 @@ def GetCameraPoseFromE(E):
 
     return R_set, C_set
 
+
+
 def Triangulation(P1, P2, track1, track2):
     """
-    Use the linear triangulation method to triangulate the points
+    Use the linear triangulation method to triangulation the point
 
     Parameters
     ----------
@@ -90,7 +85,11 @@ def Triangulation(P1, P2, track1, track2):
         X_temp = X_temp / X_temp[3]
         X.append(X_temp[:3])
     X = np.array(X)
+
     return X
+
+
+
 
 def EvaluateCheirality(P1, P2, X):
     """
@@ -111,6 +110,7 @@ def EvaluateCheirality(P1, P2, X):
         The binary vector indicating the cheirality condition, i.e., the entry 
         is 1 if the point is in front of both cameras, and 0 otherwise
     """
+
     X_h = np.hstack((X, np.ones((X.shape[0], 1))))
 
     projection1 = P1 @ X_h.T
@@ -120,7 +120,9 @@ def EvaluateCheirality(P1, P2, X):
     projection2_z = projection2[2, :]
 
     valid_index = (projection1_z > 0) & (projection2_z > 0)
+    
     return valid_index
+
 
 def EstimateCameraPose(track1, track2):
     """
@@ -142,25 +144,9 @@ def EstimateCameraPose(track1, track2):
     X : ndarray of shape (F, 3)
         The set of reconstructed 3D points
     """
-    # compute essential matrix
-    valid_track1 = np.bitwise_not(track1 == -1)
-    valid_track1 = np.bitwise_or(valid_track1[:,0],valid_track1[:,1])
-    valid_track2 = np.bitwise_not(track2 == -1)
-    valid_track2 = np.bitwise_or(valid_track2[:,0],valid_track2[:,1])
-    valid_track = np.bitwise_and(valid_track1,valid_track2)
-    _track1 = track1[valid_track]
-    _track2 = track2[valid_track]
-    valid_track = np.where(valid_track)[0]
-
-    track1_cam_coor = np.hstack((_track1, np.ones((_track1.shape[0], 1))))
-    track1_cam_coor = np.linalg.inv(K) @ track1_cam_coor.T
-    track1_cam_coor = track1_cam_coor.T[:,:2]
-
-    track2_cam_coor = np.hstack((_track2, np.ones((_track2.shape[0], 1))))
-    track2_cam_coor = np.linalg.inv(K) @ track2_cam_coor.T
-    track2_cam_coor = track2_cam_coor.T[:,:2]
-
-    E, _ = EstimateE_RANSAC(track1_cam_coor, track2_cam_coor)
+    _track1, _track2, valid_track = get_matching_from_track(track1, track2)
+    
+    E, _ = EstimateE_RANSAC(_track1, _track2)
 
     # Estimate four configurations of poses
     R_set, C_set = GetCameraPoseFromE(E)
@@ -178,77 +164,22 @@ def EstimateCameraPose(track1, track2):
             val_max = val
             R_best = R
             C_best = C
+            _X_best = X
             best_valid_index = valid_index
     X_best = np.ones([track1.shape[0], 3]) * -1
-    X_best[valid_track[best_valid_index]] = X[best_valid_index]
-
-    # Visualize 3D points project Z axis
-    if SAVE_RESULT:
-        plt.figure()
-        plt.scatter(X_best[:,1],X_best[:,2])
-        plt.scatter([0],[0])
-        plt.savefig("output/3D_points/3D_points.png")
+    X_best[valid_track[best_valid_index]] = _X_best[best_valid_index]
 
     return R_best, C_best, X_best
 
-def plot_camera(ax, position, direction, length=1.0, color='r', label='Camera'):
-    # Plot the camera position
-    ax.scatter(position[0], position[1], position[2], color=color, s=100, label=label)
-    
-    # Calculate the end point of the direction vector
-    end_point = position + length * direction
-    
-    # Plot the direction vector
-    ax.quiver(position[0], position[1], position[2],
-              direction[0], direction[1], direction[2],
-              color=color, length=length, arrow_length_ratio=0.1)
-    
+# import matplotlib.pyplot as plt
+# from mpl_toolkits.mplot3d import Axes3D
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+# ax.set_xlabel('X')
+# ax.set_ylabel('Y')
+# ax.set_zlabel('Z')
 
-if __name__ == '__main__':
-    import os
-    import cv2
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-
-    track = np.load("result_npy/track.npy")
-    track1 = track[0, :, :]
-    track2 = track[1, :, :]
-    R, C, X = EstimateCameraPose(track1, track2)
-    
-    if SAVE_RESULT:
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        # Set labels
-        ax.set_xlabel('X axis')
-        ax.set_ylabel('Y axis')
-        ax.set_zlabel('Z axis')
-        # Set axis limits
-        ax.set_xlim(-1, 1)
-        ax.set_ylim(-1, 1)
-        ax.set_zlim(-1, 1)
-
-        # First camera position and direction
-        camera1_position = np.array([0, 0, 0])
-        camera1_direction = np.array([0, 0, 1])  # Assuming camera looks along Z-axis
-
-        # Normalize the direction vector
-        camera1_direction = camera1_direction / np.linalg.norm(camera1_direction)
-
-        # Plot the first camera
-        plot_camera(ax, camera1_position, camera1_direction, color='r', label='Camera 1')
-
-        # Second camera position and direction
-        camera2_position = R @ C
-        camera2_direction = R @ camera1_direction
-
-        # Normalize the direction vector
-        camera2_direction = camera2_direction / np.linalg.norm(camera2_direction)
-
-        # Plot the second camera
-        plot_camera(ax, camera2_position, camera2_direction, color='b', label='Camera 2')
-
-        # Show legend
-        ax.legend()
-
-        # Save figure
-        plt.savefig("output/camera_pose/camera_poses.png")
+# vis_point = _X_best[best_valid_index]
+# vis_point = vis_point[(np.abs(vis_point) < 80).all(axis=1)]
+# ax.scatter(vis_point[:,0], vis_point[:, 1], vis_point[:, 2])
+# plt.show()

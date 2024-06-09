@@ -3,6 +3,10 @@ from scipy.optimize import least_squares
 
 from utils import Rotation2Quaternion
 from utils import Quaternion2Rotation
+from utils import jacobian_BA
+from utils import ComputeReprojection
+from utils import cal_reprojection_error
+from utils import decompose_extrinsic_matrix
 
 
 def FindMissingReconstruction(X, track_i):
@@ -22,12 +26,11 @@ def FindMissingReconstruction(X, track_i):
         The indicator of new points that are valid for the new image and are 
         not reconstructed yet
     """
-    
-    # TODO Your code goes here
+    Valid_X = X[:,0] != -1
+    Valid_track_i = track_i[:,0] != -1
+    new_point = np.bitwise_and(Valid_X, Valid_track_i)
 
     return new_point
-
-
 
 def Triangulation_nl(X, P1, P2, x1, x2):
     """
@@ -51,55 +54,27 @@ def Triangulation_nl(X, P1, P2, x1, x2):
     X_new : ndarray of shape (n, 3)
         The set of refined 3D points
     """
-    
-    # TODO Your code goes here
+    _lambda = 5
+    R1, C1 = decompose_extrinsic_matrix(P1)
+    R2, C2 = decompose_extrinsic_matrix(P2)
+    q1 = Rotation2Quaternion(R1)
+    q2 = Rotation2Quaternion(R2)
+    p1 = np.hstack((C1, q1))
+    p2 = np.hstack((C2, q2))
 
-    return X_new
+    X_new = np.zeros((X.shape[0], 3))
+    for j in range(X.shape[0]):
+        f1 = ComputeReprojection(p1,X[j])
+        f2 = ComputeReprojection(p2,X[j])
+        J1 = ComputePointJacobian(X[j], p1)
+        J2 = ComputePointJacobian(X[j], p2)
 
-def jacobian_AB(A, B):
-    """
-    행렬 곱셈 C = A @ B에 대한 자코비안 행렬을 계산합니다.
-    
-    Parameters:
-        A: 입력 행렬 A (m x n)
-        B: 입력 행렬 B (n x p)
+        E1 = np.linalg.inv(J1.T@J1 + _lambda*np.eye(3))@J1.T(x1[j] - f1)
+        E2 = np.linalg.inv(J2.T@J2 + _lambda*np.eye(3))@J2.T(x2[j] - f2)
+        delta_X = E1 + E2
+        X_new[j] = X[j] + delta_X
         
-    Returns:
-        자코비안 행렬 J (mp x mn 크기의 2차원 배열)
-    """
-    m, n = A.shape
-    n, p = B.shape
-    J = np.zeros((m * p, m * n))
-    
-    for i in range(m):
-        for j in range(p):
-            for k in range(n):
-                # C_ij = sum_k A_ik B_kj 이므로 ∂C_ij/∂A_ik = B_kj
-                J[i * p + j, i * n + k] = B[k, j]
-                
-    return J
-
-def jacobian_BA(B, A):
-    """
-    행렬 B와 A의 곱셈에 대한 자코비안 행렬을 계산합니다.
-
-    Parameters:
-        B: 입력 행렬 B (p x m)
-        A: 입력 행렬 A (m x n)
-
-    Returns:
-        자코비안 행렬 J (p*n x m*n 크기의 2차원 배열)
-    """
-    p, m = B.shape
-    m, n = A.shape
-    J = np.zeros((p * n, m * n))
-    
-    for i in range(p):
-        for j in range(n):
-            for k in range(m):
-                J[i * n + j, k * n + j] = B[i, k]
-                
-    return J
+    return X_new
 
 def ComputePointJacobian(X, p):
     """
@@ -118,7 +93,7 @@ def ComputePointJacobian(X, p):
         The point Jacobian
     """
     
-    #forward pass
+        #forward pass
     C = p[:3]
     _C = np.eye(3,4)
     _C[:3,3] = -C
@@ -165,8 +140,32 @@ def SetupBundleAdjustment(P, X, track):
     point_index : ndarray of shape (M,)
         The index of 3D point for each measurement
     """
-    
-    # TODO Your code goes here
+    z = []
+    # p를 만드는 구간
+    for i in range(P.shape[0]):
+        R,C = decompose_extrinsic_matrix(P[i])
+        q = Rotation2Quaternion(R)
+        p = np.hstack((C, q)).reshape(-1,1)
+        z.append(p)
+
+    #s를 만드는 구간
+    s = []
+    for i in range(track.shape[0]):
+        s_i = FindMissingReconstruction(X, track[i])
+        s.append(s_i)
+    s = np.array(s) #k,J
+
+    #b를 만드는 구간
+    b = []
+    for i in range(track.shape[0]):
+        for j in range(track.shape[1]):
+            if s[i][j]:
+                b.append(track[i,j,:])
+    b = np.vstack(b)
+   
+   #S를 만드는 구간
+   
+
 
     return z, b, S, camera_index, point_index
     
