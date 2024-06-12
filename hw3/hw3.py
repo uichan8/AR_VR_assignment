@@ -15,6 +15,9 @@ from reconstruction import FindMissingReconstruction
 from reconstruction import Triangulation_nl
 from reconstruction import RunBundleAdjustment, SetupBundleAdjustment
 from utils import get_matching_from_track
+from utils import decompose_extrinsic_matrix
+from utils import make_projective_matrix
+
 np.random.seed(42)
 
 if __name__ == '__main__':
@@ -53,44 +56,42 @@ if __name__ == '__main__':
 
     # Set first two camera poses
     P[0] = np.eye(3, 4)
-    P[1, :, :3] = R
-    P[1, :, 3] = -R @ C
-
-    SetupBundleAdjustment(P, X, track)
+    P[1] = make_projective_matrix(R, C)
     
     ransac_n_iter = 200
-    ransac_thr = 0.01
+    ransac_thr = 0.001
     for i in range(2, num_images):
         # Estimate new camera pose
-        # TODO Your code goes here
+        R, C, _ = EstimateCameraPose(track[0,:,:], track[i,:,:])
 
         # Add new camera pose to the set
-        # TODO Your code goes here
+        P[i] = make_projective_matrix(R, C)
 
         for j in range(i):
             # Fine new points to reconstruct
-            # TODO Your code goes here
+            _track1, _track2, valid_track = get_matching_from_track(track[j,:,:], track[i,:,:])
 
             # Triangulate points
-            # TODO Your code goes here
+            _X = Triangulation(P[j,:,:], P[i,:,:], _track1, _track2)
 
             # Filter out points based on cheirality
-            # TODO Your code goes here
+            valid_index2 = EvaluateCheirality(P[j,:,:], P[i,:,:], _X)
 
             # Update 3D points
-            # TODO Your code goes here
-            pass
+            X[valid_track[valid_index2], :] = _X[valid_index2, :]
+        X_new = X
+        X_ba = X
         
-        # Run bundle adjustment
-        valid_ind = X[:, 0] != -1
-        X_ba = X[valid_ind, :]
-        track_ba = track[:i + 1, valid_ind, :]
-        P_new, X_new = RunBundleAdjustment(P[:i + 1, :, :], X_ba, track_ba)
-        P[:i + 1, :, :] = P_new
-        X[valid_ind, :] = X_new
+        # # Run bundle adjustment
+        # valid_ind = X[:, 0] != -1
+        # X_ba = X[valid_ind, :]
+        # track_ba = track[:i + 1, valid_ind, :]
+        # P_new, X_new = RunBundleAdjustment(P[:i + 1, :, :], X_ba, track_ba)
+        # P[:i + 1, :, :] = P_new
+        # X[valid_ind, :] = X_new
 
-        P[:i+1,:,:] = P_new
-        X[valid_ind,:] = X_new
+        # P[:i+1,:,:] = P_new
+        # X[valid_ind,:] = X_new
 
         ###############################################################
         # Save the camera coordinate frames as meshes for visualization

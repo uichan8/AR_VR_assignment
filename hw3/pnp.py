@@ -32,31 +32,25 @@ def PnP(X, x):
         The camera center
     """
     # Construct matrix A
-    # num_points = X.shape[0]
-    # A = []
+    num_points = X.shape[0]
+    A = []
 
-    # for i in range(num_points):
-    #     _X, _Y, _Z = X[i]
-    #     _x, _y = x[i]
-    #     A.append([_X, _Y, _Z, 1, 0, 0, 0, 0, -_x*_X, -_x*_Y, -_x*_Z, -_x])
-    #     A.append([0, 0, 0, 0, _X, _Y, _Z, 1, -_y*_X, -_y*_Y, -_y*_Z, -_y])
+    for i in range(num_points):
+        _X, _Y, _Z = X[i]
+        _x, _y = x[i]
+        A.append([_X, _Y, _Z, 1, 0, 0, 0, 0, -_x*_X, -_x*_Y, -_x*_Z, -_x])
+        A.append([0, 0, 0, 0, _X, _Y, _Z, 1, -_y*_X, -_y*_Y, -_y*_Z, -_y])
 
-    # A = np.array(A)
+    A = np.array(A)
 
-    # # Solve for h using SVD
-    # _, _, V = np.linalg.svd(A)
-    # P = V[-1].reshape(3, 4)
+    # Solve for h using SVD
+    _, _, V = np.linalg.svd(A)
+    P = V[-1].reshape(3, 4)
 
-    # R,C = decompose_extrinsic_matrix(P)
-
-    success, rvec, tvec = cv2.solvePnP(X, x, np.eye(3),np.zeros((5,)))
-    R, _ = cv2.Rodrigues(rvec)  # 회전 벡터를 회전 행렬로 변환
-    C = -np.linalg.inv(R) @ tvec  # 카메라 중심 계산
-    C = C.reshape(3,)
+    P /= P[2,3]
+    R,C = decompose_extrinsic_matrix(P)    
 
     return R, C
-
-
 
 def PnP_RANSAC(X, x, ransac_n_iter = 200, ransac_thr = 0.001):
     """
@@ -107,8 +101,6 @@ def PnP_RANSAC(X, x, ransac_n_iter = 200, ransac_thr = 0.001):
             best_inlier = np.array(inliers)
     
     return best_R, best_C, best_inlier
-
-
 
 def ComputePoseJacobian(p, X):
     """
@@ -236,7 +228,7 @@ if __name__ == "__main__":
     # Build feature track
     track = BuildFeatureTrack(Im, K)
 
-    i = 0
+    i = 1
     track_0 = track[i]
     track_1 = track[(i+1)%num_images]
 
@@ -252,12 +244,13 @@ if __name__ == "__main__":
     _R, _C = PnP_nl(R, C, X, track_0)
 
     plt.imshow(Im[i])
+    s = 1
     # gt 찍기
     gt = track_0.copy()
     gt = np.hstack((gt, np.ones((gt.shape[0],1))))
     gt = K@gt.T
     gt = gt.T
-    plt.scatter(gt[:,0], gt[:,1], c='r')
+    plt.scatter(gt[:,0], gt[:,1], c='r', s=s)  # 점 크기를 10으로 설정
     
     #보정 전 찍기
     pred = X.copy()
@@ -265,20 +258,18 @@ if __name__ == "__main__":
     P = make_projective_matrix(R, C)
     pred = K@P@pred.T
     pred = pred.T
-    plt.scatter(pred[:,0], pred[:,1], c='b')
+    pred = pred/pred[:,2:3]
+    plt.scatter(pred[:,0], pred[:,1], c='b', s=s)  # 점 크기를 10으로 설정
 
-    # #보정 후 찍기
-    # pred = X.copy()
-    # pred = np.hstack((pred, np.ones((pred.shape[0],1))))
-    # P = make_projective_matrix(_R, _C)
-    # pred = K@P@pred.T
-    # pred = pred.T
-    # plt.scatter(pred[:,0], pred[:,1], c='g')
+    #보정 후 찍기
+    pred = X.copy()
+    pred = np.hstack((pred, np.ones((pred.shape[0],1))))
+    P = make_projective_matrix(_R, _C)
+    pred = K@P@pred.T
+    pred = pred.T
+    pred = pred/pred[:,2:3]
+    plt.scatter(pred[:,0], pred[:,1], c='g', s=s)  # 점 크기를 10으로 설정
     plt.show()
-
-
-
-    
 
     print(cal_reprojection_error(_R,_C,X,track_0).sum() - cal_reprojection_error(R,C,X,track_0).sum())
         
