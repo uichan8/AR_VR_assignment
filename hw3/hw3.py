@@ -13,7 +13,7 @@ from pnp import PnP_RANSAC
 from pnp import PnP_nl
 from reconstruction import FindMissingReconstruction
 from reconstruction import Triangulation_nl
-from reconstruction import RunBundleAdjustment
+from reconstruction import RunBundleAdjustment, SetupBundleAdjustment
 from utils import get_matching_from_track
 np.random.seed(42)
 
@@ -55,6 +55,8 @@ if __name__ == '__main__':
     P[0] = np.eye(3, 4)
     P[1, :, :3] = R
     P[1, :, 3] = -R @ C
+
+    SetupBundleAdjustment(P, X, track)
     
     ransac_n_iter = 200
     ransac_thr = 0.01

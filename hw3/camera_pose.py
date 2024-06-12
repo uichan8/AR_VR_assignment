@@ -171,15 +171,89 @@ def EstimateCameraPose(track1, track2):
 
     return R_best, C_best, X_best
 
-# import matplotlib.pyplot as plt
-# from mpl_toolkits.mplot3d import Axes3D
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
-# ax.set_xlabel('X')
-# ax.set_ylabel('Y')
-# ax.set_zlabel('Z')
 
-# vis_point = _X_best[best_valid_index]
-# vis_point = vis_point[(np.abs(vis_point) < 80).all(axis=1)]
-# ax.scatter(vis_point[:,0], vis_point[:, 1], vis_point[:, 2])
-# plt.show()
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    import cv2
+    from feature import BuildFeatureTrack
+
+
+    K = np.asarray([
+        [350, 0, 480],
+        [0, 350, 270],
+        [0, 0, 1]
+    ])
+    num_images = 6
+    h_im = 540
+    w_im = 960
+
+    # Load input images
+    Im = np.empty((num_images, h_im, w_im, 3), dtype=np.uint8)
+    for i in range(num_images):
+        im_file = 'im/image{:07d}.jpg'.format(i + 1)
+        im = cv2.imread(im_file)
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        Im[i,:,:,:] = im
+
+    # Build feature track
+    track = BuildFeatureTrack(Im, K)
+
+    track_0 = track[0]
+    track_1 = track[1]
+
+    R, C, X = EstimateCameraPose(track_0, track_1)
+    valid = X[:,0] != -1
+
+    track_0 = track_0[valid]
+    track_1 = track_1[valid]
+    X = X[valid]
+
+    #img에 track0,1 표시
+    Im0 = Im[0,:,:,:]
+    Im1 = Im[1,:,:,:]
+
+    track_0_img_coor = np.hstack((track_0, np.ones((track_0.shape[0], 1))))
+    track_0_img_coor = K@track_0_img_coor.T
+    track_0_img_coor = track_0_img_coor[:2].T
+
+    track_1_img_coor = np.hstack((track_1, np.ones((track_1.shape[0], 1))))
+    track_1_img_coor = K@track_1_img_coor.T
+    track_1_img_coor = track_1_img_coor[:2].T
+
+    for j in range(track_0.shape[0]):
+        cv2.circle(Im0, tuple(track_0_img_coor[j].astype(int)), 5, (0, 0, 255), -1)
+        cv2.circle(Im1, tuple(track_1_img_coor[j].astype(int)), 5, (0, 255, 0), -1)
+
+    concat_image = np.concatenate((Im0, Im1), axis=1)
+    plt.imshow(concat_image)
+    #plt.show()
+    plt.clf()
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+
+    #x,y,z축 범위 설정
+    ax.set_xlim(-10, 20)
+    ax.set_ylim(-20, 10)
+    ax.set_zlim(-0, 30)
+
+    start1 = np.array([0, 0, 0])
+    end1 = np.array([0,0,3])
+
+    start2 = start1 + C
+    end2 = R@end1 + C
+
+    ax.quiver(start1[0], start1[1], start1[2], end1[0], end1[1], end1[2], color='blue')
+    ax.quiver(start2[0], start2[1], start2[2], end2[0], end2[1], end2[2], color='red')
+
+
+    vis_point = X
+    vis_point = vis_point[(np.abs(vis_point) < 80).all(axis=1)]
+    ax.scatter(vis_point[:,0], vis_point[:, 1], vis_point[:, 2])
+    plt.show()

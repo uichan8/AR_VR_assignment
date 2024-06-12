@@ -22,8 +22,6 @@ def Rotation2Quaternion(R):
 
     return q
 
-
-
 def Quaternion2Rotation(q):
     """
     Convert a quaternion to rotation matrix
@@ -177,3 +175,9 @@ def decompose_extrinsic_matrix(P):
     C = -np.linalg.inv(R) @ t
     
     return R, C
+
+def make_projective_matrix(R,C):
+    _C = np.eye(3,4)
+    _C[:3,3] = -C
+    P = R@_C
+    return P

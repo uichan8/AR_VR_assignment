@@ -53,7 +53,6 @@ def MatchSIFT(loc1, des1, loc2, des2):
 
     return x1, x2, ind1
 
-
 def EstimateE(x1, x2):
     """
     Estimate the essential matrix, which is a rank 2 matrix with singular values
@@ -153,55 +152,127 @@ def BuildFeatureTrack(Im, K):
     T = max([i[0].shape[0] for i in SIFT_feature])
 
     #intialize the track
-    track = np.ones([Im.shape[0],T,2]) * -1
-    for i in tqdm(range(Im.shape[0])):
+    temp_track = []
+    for i in tqdm(range(Im.shape[0]-1)):
         track_i = np.ones([Im.shape[0],T,2]) * -1
-        sift_points = SIFT_feature[i][0]
-        sift_points = np.hstack((sift_points, np.ones((sift_points.shape[0], 1))))
-        sift_points = np.linalg.inv(K)@sift_points.T
-        sift_points = sift_points.T[:,:2]
-        track_i[i,:SIFT_feature[i][0].shape[0]] = sift_points
         for j in range(i+1,Im.shape[0]):
-            if i == j:
-                continue
             i_loc, i_des = SIFT_feature[i]
             j_loc, j_des = SIFT_feature[j]
-            x1, x2, ind1 = MatchSIFT(j_loc, j_des, i_loc, i_des)
+            x1, x2, ind1 = MatchSIFT(i_loc, i_des, j_loc, j_des)
 
             #Normalize coordinate by multiplying the inverse of the intrinsic matrix
             x1 = np.hstack((x1, np.ones((x1.shape[0], 1))))
             x1 = np.linalg.inv(K)@x1.T
-            x1 = x1.T[:,:2] #j
+            x1 = x1.T[:,:2] #i
 
             x2 = np.hstack((x2, np.ones((x2.shape[0], 1))))
             x2 = np.linalg.inv(K)@x2.T
-            x2 = x2.T[:,:2] #i
+            x2 = x2.T[:,:2] #j
 
             # find inlier using essential matrix
             E, inlier = EstimateE_RANSAC(x1, x2)
 
             # Update track_i
-            cam_coor = j_loc[ind1[inlier]].copy()
-            cam_coor = np.hstack((cam_coor, np.ones((cam_coor.shape[0], 1))))
-            cam_coor = np.linalg.inv(K)@cam_coor.T
-            cam_coor = cam_coor.T[:,:2]
-            track_i[j,ind1[inlier]] = cam_coor
-            
-            #Remove feature that is not matched
-            matched_array = (track_i != -1)
-            matched_array = matched_array[:,:,0] + matched_array[:,:,1]
-            matched_index = matched_array.sum(axis = 0) > 1
-            matched_array = np.bitwise_and(matched_array,matched_index)
-            matched_index = np.where(matched_array)
-            track[matched_index] = track_i[matched_index]
-            
+            x1 = x1[inlier]
+            x2 = x2[inlier]
+            track_i[i,ind1[inlier]] = x1
+            track_i[j,ind1[inlier]] = x2
 
+        #Remove feature that is not matched
+        valid_track_index = (track_i[:,:,0]!=-1).sum(axis = 0)!=0
+        track_i = track_i[:,valid_track_index]
+        temp_track.append(track_i)
 
-    #delete the feature that is not matched
-    matched_array = np.bitwise_not(track == -1)
-    matched_array = matched_array[:,:,0] + matched_array[:,:,1]
-    matched_index = matched_array.sum(axis = 0) > 1
-    matched_index = np.where(matched_index)[0]
-    track = track[:,matched_index]
+    #aggregate_track
+    track = np.zeros([Im.shape[0],0,2])
+    for i in range(len(temp_track)):
+        target_track = temp_track[i]
+        valid_target_index = np.array([target_track[i][j] not in track[i] for j in range(target_track[i].shape[0])])
+        track = np.concatenate((track, target_track[:,valid_target_index]), axis=1)
 
     return track
+
+#visualize epilines
+def draw_epilines(img1, img2, pts1, pts2, K):
+    # Find the fundamental matrix
+    E, inlier = EstimateE_RANSAC(pts1, pts2)
+    
+    # Select only inlier points
+    pts1 = pts1[inlier]
+    pts2 = pts2[inlier]
+
+    #to img coordinate
+    pts1 = np.hstack((pts1, np.ones((pts1.shape[0], 1))))
+    pts1 = K@pts1.T
+    pts1 = pts1.T[:,:2]
+
+    pts2 = np.hstack((pts2, np.ones((pts2.shape[0], 1))))
+    pts2 = K@pts2.T
+    pts2 = pts2.T[:,:2]
+
+    # E 2 F
+    F = np.linalg.inv(K).T@E@np.linalg.inv(K)
+    
+    # Find epilines corresponding to points in the right image (second image) and drawing its lines on left image
+    lines1 = cv2.computeCorrespondEpilines(pts2.reshape(-1, 1, 2), 2, F)
+    lines1 = lines1.reshape(-1, 3)
+    
+    img1_epilines = draw_lines(img1, lines1, pts1)
+    
+    # Find epilines corresponding to points in the left image (first image) and drawing its lines on right image
+    lines2 = cv2.computeCorrespondEpilines(pts1.reshape(-1, 1, 2), 1, F)
+    lines2 = lines2.reshape(-1, 3)
+    
+    img2_epilines = draw_lines(img2, lines2, pts2)
+    
+    return img1_epilines, img2_epilines
+
+def draw_lines(img, lines, pts):
+    r, c = img.shape[:2]
+    img_lines = img.copy()
+    for r, pt in zip(lines, pts):
+        color = tuple(np.random.randint(0, 255, 3).tolist())
+        x0, y0 = map(int, [0, -r[2]/r[1]])
+        x1, y1 = map(int, [c, -(r[2]+r[0]*c)/r[1]])
+        img_lines = cv2.line(img_lines, (x0, y0), (x1, y1), color, 1)
+        img_lines = cv2.circle(img_lines, tuple(pt.astype(int)), 5, color, -1)
+    return img_lines
+
+if __name__ == "__main__":
+    K = np.asarray([
+        [350, 0, 480],
+        [0, 350, 270],
+        [0, 0, 1]
+    ])
+    num_images = 6
+    h_im = 540
+    w_im = 960
+
+    # Load input images
+    Im = np.empty((num_images, h_im, w_im, 3), dtype=np.uint8)
+    for i in range(num_images):
+        im_file = 'im/image{:07d}.jpg'.format(i + 1)
+        im = cv2.imread(im_file)
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        Im[i,:,:,:] = im
+
+    # Build feature track
+    track = BuildFeatureTrack(Im, K)
+
+    track_0 = track[0]
+    track_1 = track[1]
+    
+    valid = np.bitwise_and(track_0[:,0] != -1,track_1[:,0] != -1)
+    track_0 = track_0[valid]
+    track_1 = track_1[valid]
+
+    img1_epilines, img2_epilines = draw_epilines(Im[0], Im[1], track_0, track_1, K)
+
+    concat_image = np.concatenate([img1_epilines, img2_epilines], axis=1)
+    concat_image_rgb = cv2.cvtColor(concat_image, cv2.COLOR_BGR2RGB)
+    cv2.imshow('Concatenated Image', concat_image_rgb)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    
+

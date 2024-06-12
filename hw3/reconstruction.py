@@ -148,6 +148,11 @@ def SetupBundleAdjustment(P, X, track):
         p = np.hstack((C, q)).reshape(-1,1)
         z.append(p)
 
+    for i in range(X.shape[0]):
+        z.append(X[i].reshape(-1,1))
+        
+    z = np.vstack(z)
+
     #s를 만드는 구간
     s = []
     for i in range(track.shape[0]):
@@ -163,11 +168,20 @@ def SetupBundleAdjustment(P, X, track):
                 b.append(track[i,j,:])
     b = np.vstack(b)
    
-   #S를 만드는 구간
+    #S를 만드는 구간
+    S = np.zeros([b.shape[0], z.shape[0]])
+    s_where = np.where(s)
+    for k,j in zip(s_where[0], s_where[1]):
+        S[k,j] = 1
+    
+
+
+    
+
    
 
 
-    return z, b, S, camera_index, point_index
+    #return z, b, S, camera_index, point_index
     
 
 

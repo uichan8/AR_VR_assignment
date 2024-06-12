@@ -9,6 +9,8 @@ from utils import jacobian_BA
 from utils import quaternion_to_rotation_matrix_jacobian
 from utils import ComputeReprojection
 from utils import cal_reprojection_error
+from utils import decompose_extrinsic_matrix
+from utils import make_projective_matrix
 
 
 def PnP(X, x):
@@ -29,17 +31,34 @@ def PnP(X, x):
     C : ndarray of shape (3,)
         The camera center
     """
-    
-    # TODO Your code goes here
-    success, rvec, tvec = cv2.solvePnP(X, x, np.eye(3), None)
-    R, _ = cv2.Rodrigues(rvec)
-    C = -R.T @ tvec.flatten()
+    # Construct matrix A
+    # num_points = X.shape[0]
+    # A = []
+
+    # for i in range(num_points):
+    #     _X, _Y, _Z = X[i]
+    #     _x, _y = x[i]
+    #     A.append([_X, _Y, _Z, 1, 0, 0, 0, 0, -_x*_X, -_x*_Y, -_x*_Z, -_x])
+    #     A.append([0, 0, 0, 0, _X, _Y, _Z, 1, -_y*_X, -_y*_Y, -_y*_Z, -_y])
+
+    # A = np.array(A)
+
+    # # Solve for h using SVD
+    # _, _, V = np.linalg.svd(A)
+    # P = V[-1].reshape(3, 4)
+
+    # R,C = decompose_extrinsic_matrix(P)
+
+    success, rvec, tvec = cv2.solvePnP(X, x, np.eye(3),np.zeros((5,)))
+    R, _ = cv2.Rodrigues(rvec)  # 회전 벡터를 회전 행렬로 변환
+    C = -np.linalg.inv(R) @ tvec  # 카메라 중심 계산
+    C = C.reshape(3,)
 
     return R, C
 
 
 
-def PnP_RANSAC(X, x, ransac_n_iter = 200, ransac_thr = 0.01):
+def PnP_RANSAC(X, x, ransac_n_iter = 200, ransac_thr = 0.001):
     """
     Estimate pose using PnP with RANSAC
 
@@ -67,10 +86,9 @@ def PnP_RANSAC(X, x, ransac_n_iter = 200, ransac_thr = 0.01):
     
     best_R, best_C, best_inlier = None, None, None
     best_score = 0
-    sampling = 4
+    sampling = 20
     
     for i in tqdm(range(ransac_n_iter)):
-        # 6개의 인덱스 가져오기
         index = np.random.choice(X.shape[0], sampling, replace=False)
         _X = X[index]
         _x = x[index]
@@ -188,3 +206,88 @@ def PnP_nl(R, C, X, x):
     C_refined = p2[:3]
 
     return R_refined, C_refined
+
+
+
+if __name__ == "__main__":
+    import cv2
+    from feature import BuildFeatureTrack
+    from camera_pose import EstimateCameraPose
+    import matplotlib.pyplot as plt
+
+
+    K = np.asarray([
+        [350, 0, 480],
+        [0, 350, 270],
+        [0, 0, 1]
+    ])
+    num_images = 6
+    h_im = 540
+    w_im = 960
+
+    # Load input images
+    Im = np.empty((num_images, h_im, w_im, 3), dtype=np.uint8)
+    for i in range(num_images):
+        im_file = 'im/image{:07d}.jpg'.format(i + 1)
+        im = cv2.imread(im_file)
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        Im[i,:,:,:] = im
+
+    # Build feature track
+    track = BuildFeatureTrack(Im, K)
+
+    i = 0
+    track_0 = track[i]
+    track_1 = track[(i+1)%num_images]
+
+    R, C, X = EstimateCameraPose(track_0, track_1)
+    
+    valid = (track_0[:,0] != -1) & (X[:,0] != -1)
+    X = X[valid]
+    track_0 = track_0[valid]
+    R, C, inlier = PnP_RANSAC(X, track_0)
+
+    X = X[inlier]
+    track_0 = track_0[inlier]
+    _R, _C = PnP_nl(R, C, X, track_0)
+
+    plt.imshow(Im[i])
+    # gt 찍기
+    gt = track_0.copy()
+    gt = np.hstack((gt, np.ones((gt.shape[0],1))))
+    gt = K@gt.T
+    gt = gt.T
+    plt.scatter(gt[:,0], gt[:,1], c='r')
+    
+    #보정 전 찍기
+    pred = X.copy()
+    pred = np.hstack((pred, np.ones((pred.shape[0],1))))
+    P = make_projective_matrix(R, C)
+    pred = K@P@pred.T
+    pred = pred.T
+    plt.scatter(pred[:,0], pred[:,1], c='b')
+
+    # #보정 후 찍기
+    # pred = X.copy()
+    # pred = np.hstack((pred, np.ones((pred.shape[0],1))))
+    # P = make_projective_matrix(_R, _C)
+    # pred = K@P@pred.T
+    # pred = pred.T
+    # plt.scatter(pred[:,0], pred[:,1], c='g')
+    plt.show()
+
+
+
+    
+
+    print(cal_reprojection_error(_R,_C,X,track_0).sum() - cal_reprojection_error(R,C,X,track_0).sum())
+        
+
+
+    
+
+
+
+
+    
+
