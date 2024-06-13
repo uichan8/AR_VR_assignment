@@ -79,19 +79,17 @@ if __name__ == '__main__':
 
             # Update 3D points
             X[valid_track[valid_index2], :] = _X[valid_index2, :]
-        X_new = X
-        X_ba = X
         
-        # # Run bundle adjustment
-        # valid_ind = X[:, 0] != -1
-        # X_ba = X[valid_ind, :]
-        # track_ba = track[:i + 1, valid_ind, :]
-        # P_new, X_new = RunBundleAdjustment(P[:i + 1, :, :], X_ba, track_ba)
-        # P[:i + 1, :, :] = P_new
-        # X[valid_ind, :] = X_new
+        # Run bundle adjustment
+        valid_ind = X[:, 0] != -1
+        X_ba = X[valid_ind, :]
+        track_ba = track[:i + 1, valid_ind, :]
+        P_new, X_new = RunBundleAdjustment(P[:i + 1, :, :], X_ba, track_ba)
+        P[:i + 1, :, :] = P_new
+        X[valid_ind, :] = X_new
 
-        # P[:i+1,:,:] = P_new
-        # X[valid_ind,:] = X_new
+        P[:i+1,:,:] = P_new
+        X[valid_ind,:] = X_new
 
         ###############################################################
         # Save the camera coordinate frames as meshes for visualization
