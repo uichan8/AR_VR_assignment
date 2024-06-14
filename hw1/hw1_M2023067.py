@@ -89,7 +89,6 @@ m12 = np.array([1927, 1539])
 m21 = np.array([1233, 1526])
 m22 = np.array([1690, 1437])
 
-# 씨발
 l11 = GetLineFromTwoPoints(m11,m12)
 l12 = GetLineFromTwoPoints(m21,m22)
 l21 = GetLineFromTwoPoints(m11,m21)
